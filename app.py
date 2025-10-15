@@ -7,6 +7,7 @@ import pytesseract
 import pdfplumber
 import json
 from sklearn.linear_model import LinearRegression
+import io
 
 st.set_page_config(page_title="Chromatogram Analyzer", layout="wide")
 

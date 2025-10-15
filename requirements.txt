@@ -6,3 +6,4 @@ Pillow
 pytesseract
 pdfplumber
 scikit-learn
+opencv-python
