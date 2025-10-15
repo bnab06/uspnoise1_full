@@ -1,0 +1,14 @@
+{
+  "admin": {
+    "pwd": "admin123",
+    "role": "admin"
+  },
+  "bb": {
+    "pwd": "pass",
+    "role": "user"
+  },
+  "user": {
+    "pwd": "user123",
+    "role": "user"
+  }
+}
