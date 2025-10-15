@@ -48,17 +48,13 @@ def read_csv_smart(uploaded_file):
     return df
 
 def extract_image_data(input_data):
-    """
-    input_data: UploadedFile ou PIL.Image
-    """
+    import re
     if isinstance(input_data, Image.Image):
         img = input_data
     else:
         img = Image.open(input_data).convert("RGB")
 
     text = pytesseract.image_to_string(img)
-
-    import re
     rows = []
     for line in text.splitlines():
         nums = re.findall(r"[-+]?[0-9]*\.?[0-9]+", line.replace(',', '.'))
@@ -67,7 +63,6 @@ def extract_image_data(input_data):
                 rows.append([float(nums[0]), float(nums[1])])
             except:
                 continue
-
     df = pd.DataFrame(rows, columns=["Time","Signal"])
     return df if not df.empty else None
 
@@ -88,26 +83,25 @@ def extract_pdf_ocr(uploaded_pdf):
 
 # --- Main ---
 if uploaded_file:
-    # --- Extract data ---
+    df = None
     if uploaded_file.name.endswith(".csv"):
         df = read_csv_smart(uploaded_file)
-    elif uploaded_file.name.lower().endswith((".png",".jpg","jpeg")):
+    elif uploaded_file.name.lower().endswith((".png","jpg","jpeg")):
         df = extract_image_data(uploaded_file)
     elif uploaded_file.name.lower().endswith(".pdf"):
         df = extract_pdf_ocr(uploaded_file)
-    else:
-        st.error("Unsupported file type")
-        st.stop()
 
     if df is None or df.empty:
-        st.error("No data could be extracted from the uploaded file.")
+        st.warning("No numeric data detected in this file.")
+        if st.button("Convert Graph to CSV"):
+            st.info("Graphical extraction not yet implemented. Use an external tool to digitize the plot.")
         st.stop()
 
     # --- Select zone ---
-    mask = (df["Time"] >= start_time) & (df["Time"] <= end_time)
+    mask = (df["Time"]>=start_time) & (df["Time"]<=end_time)
     df_zone = df.loc[mask]
     if df_zone.empty:
-        st.error("No data in the selected zone. Please adjust start/end times.")
+        st.error("No data in the selected zone. Adjust start/end times.")
         st.stop()
 
     # --- Calculations ---
