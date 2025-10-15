@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from PIL import Image
-import pytesseract
 import pdfplumber
+import cv2
+import io
 import json
 from sklearn.linear_model import LinearRegression
-import io
 
 st.set_page_config(page_title="Chromatogram Analyzer", layout="wide")
 
@@ -57,45 +57,30 @@ def read_csv_smart(uploaded_file):
         return None
     return df
 
-def extract_image_data(input_data):
-    import re
-    try:
-        if isinstance(input_data, Image.Image):
-            img = input_data
-        else:
-            img = Image.open(input_data).convert("RGB")
-        text = pytesseract.image_to_string(img)
-        rows = []
-        for line in text.splitlines():
-            nums = re.findall(r"[-+]?[0-9]*\.?[0-9]+", line.replace(',', '.'))
-            if len(nums) >= 2:
-                try:
-                    rows.append([float(nums[0]), float(nums[1])])
-                except:
-                    continue
-        df = pd.DataFrame(rows, columns=["Time","Signal"])
-        return df if not df.empty else None
-    except:
+def digitize_image(img):
+    """Convert an image of chromatogram into DataFrame"""
+    img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+    _, thresh = cv2.threshold(img_cv, 200, 255, cv2.THRESH_BINARY_INV)
+    coords = np.column_stack(np.where(thresh > 0))
+    if coords.size == 0:
         return None
+    # Group by X (horizontal) and take max Y
+    df = pd.DataFrame(coords, columns=["Y","X"])
+    df = df.groupby("X")["Y"].min().reset_index()
+    df["Time"] = np.interp(df["X"], [df["X"].min(), df["X"].max()], [0,10])
+    df["Signal"] = np.interp(df["Y"], [df["Y"].min(), df["Y"].max()], [0, df["Y"].max()])
+    df = df[["Time","Signal"]]
+    return df
 
-def extract_pdf_ocr(uploaded_pdf):
-    all_rows = []
+def extract_pdf_image(uploaded_pdf):
     uploaded_pdf.seek(0)
     with pdfplumber.open(uploaded_pdf) as pdf:
-        for page in pdf.pages:
-            img = page.to_image(resolution=150).original
-            df_page = extract_image_data(img)
-            if df_page is not None:
-                all_rows.extend(df_page.values.tolist())
-    if all_rows:
-        df = pd.DataFrame(all_rows, columns=["Time","Signal"])
-        df = df.drop_duplicates().sort_values("Time").reset_index(drop=True)
-        return df
-    return None
+        page = pdf.pages[0]
+        img = page.to_image(resolution=200).original
+        return img
 
 # --- Main ---
 df = None
-image_displayed = False
 
 if uploaded_file:
     if uploaded_file.name.endswith(".csv"):
@@ -103,21 +88,14 @@ if uploaded_file:
     elif uploaded_file.name.lower().endswith((".png","jpg","jpeg")):
         img = Image.open(uploaded_file)
         st.image(img, caption="Uploaded image", use_column_width=True)
-        image_displayed = True
-        df = extract_image_data(img)
+        df = digitize_image(img)
     elif uploaded_file.name.lower().endswith(".pdf"):
-        st.info("Displaying PDF first page as image")
-        with pdfplumber.open(uploaded_file) as pdf:
-            page = pdf.pages[0]
-            img = page.to_image(resolution=150).original
-            st.image(img, caption="PDF page as image", use_column_width=True)
-            image_displayed = True
-            df = extract_pdf_ocr(uploaded_file)
+        img = extract_pdf_image(uploaded_file)
+        st.image(img, caption="PDF first page", use_column_width=True)
+        df = digitize_image(img)
 
     if df is None or df.empty:
-        st.warning("No numeric data detected in this file.")
-        if st.button("Convert Graph to CSV"):
-            st.info("Graphical extraction not yet implemented. Use an external tool to digitize the plot.")
+        st.warning("No numeric data could be extracted. Use a CSV or high-contrast image.")
         st.stop()
 
     # --- Select zone ---
@@ -129,8 +107,8 @@ if uploaded_file:
 
     # --- Calculations ---
     noise_std = df_zone["Signal"].std()
-    sn_usp = df_zone["Signal"].max()/noise_std
-    sn_norm = df_zone["Signal"].mean()/noise_std
+    sn_usp = df_zone["Signal"].max()/noise_std if noise_std>0 else 0
+    sn_norm = df_zone["Signal"].mean()/noise_std if noise_std>0 else 0
     lod = 3*noise_std
     loq = 10*noise_std
 
