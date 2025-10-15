@@ -69,7 +69,7 @@ def extract_image_data(input_data):
                 continue
 
     df = pd.DataFrame(rows, columns=["Time","Signal"])
-    return df
+    return df if not df.empty else None
 
 def extract_pdf_ocr(uploaded_pdf):
     all_rows = []
@@ -88,6 +88,7 @@ def extract_pdf_ocr(uploaded_pdf):
 
 # --- Main ---
 if uploaded_file:
+    # --- Extract data ---
     if uploaded_file.name.endswith(".csv"):
         df = read_csv_smart(uploaded_file)
     elif uploaded_file.name.lower().endswith((".png",".jpg","jpeg")):
@@ -98,8 +99,18 @@ if uploaded_file:
         st.error("Unsupported file type")
         st.stop()
 
-    mask = (df["Time"]>=start_time) & (df["Time"]<=end_time)
+    if df is None or df.empty:
+        st.error("No data could be extracted from the uploaded file.")
+        st.stop()
+
+    # --- Select zone ---
+    mask = (df["Time"] >= start_time) & (df["Time"] <= end_time)
     df_zone = df.loc[mask]
+    if df_zone.empty:
+        st.error("No data in the selected zone. Please adjust start/end times.")
+        st.stop()
+
+    # --- Calculations ---
     noise_std = df_zone["Signal"].std()
     sn_usp = df_zone["Signal"].max()/noise_std
     sn_norm = df_zone["Signal"].mean()/noise_std
@@ -115,11 +126,13 @@ if uploaded_file:
         lod_conc = lod/slope
         loq_conc = loq/slope
 
+    # --- Plot ---
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df["Time"], y=df["Signal"], mode="lines", name="Signal"))
-    fig.add_trace(go.Scatter(x=df_zone["Time"], y=df_zone["Signal"], mode="lines", name="Selected Zone"))
+    fig.add_trace(go.Scatter(x=df_zone["Time"], y=df_zone["Signal"], mode="lines", name="Selected Zone", line=dict(color="red")))
     st.plotly_chart(fig, use_container_width=True)
 
+    # --- Metrics ---
     metrics = pd.DataFrame({
         "Metric":["S/N USP","S/N Normal","LOD (signal)","LOQ (signal)","LOD (conc.)","LOQ (conc.)"],
         "Value":[sn_usp,sn_norm,lod,loq,lod_conc,loq_conc]
