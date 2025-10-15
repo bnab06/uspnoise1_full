@@ -47,17 +47,27 @@ def read_csv_smart(uploaded_file):
     df.columns = ["Time","Signal"]
     return df
 
-def extract_image_data(uploaded_file):
-    img = Image.open(uploaded_file).convert("RGB")
+def extract_image_data(input_data):
+    """
+    input_data: UploadedFile ou PIL.Image
+    """
+    if isinstance(input_data, Image.Image):
+        img = input_data
+    else:
+        img = Image.open(input_data).convert("RGB")
+
     text = pytesseract.image_to_string(img)
+
     import re
     rows = []
     for line in text.splitlines():
-        nums = re.findall(r"[-+]?[0-9]*\\.?[0-9]+", line.replace(',', '.'))
-        if len(nums)>=2:
+        nums = re.findall(r"[-+]?[0-9]*\.?[0-9]+", line.replace(',', '.'))
+        if len(nums) >= 2:
             try:
-                rows.append([float(nums[0]),float(nums[1])])
-            except: continue
+                rows.append([float(nums[0]), float(nums[1])])
+            except:
+                continue
+
     df = pd.DataFrame(rows, columns=["Time","Signal"])
     return df
 
