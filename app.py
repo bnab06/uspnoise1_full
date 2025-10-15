@@ -5,8 +5,8 @@ import plotly.graph_objects as go
 from PIL import Image
 import pytesseract
 import pdfplumber
-from sklearn.linear_model import LinearRegression
 import json
+from sklearn.linear_model import LinearRegression
 
 st.set_page_config(page_title="Chromatogram Analyzer", layout="wide")
 
@@ -36,42 +36,53 @@ if not st.session_state.logged_in:
 
 st.sidebar.success(f"Logged in as: {st.session_state.user}")
 
-uploaded_file = st.sidebar.file_uploader("Upload CSV, PDF, or Image", type=["csv","pdf","png","jpg","jpeg"])
+# --- Uploads & Inputs ---
+uploaded_file = st.sidebar.file_uploader("Upload CSV, PDF, PNG or JPG", type=["csv","pdf","png","jpg","jpeg"])
 start_time = st.sidebar.number_input("Start Time", value=0.0, step=0.1)
 end_time = st.sidebar.number_input("End Time", value=10.0, step=0.1)
 cal_file = st.sidebar.file_uploader("Calibration CSV (optional)", type=["csv"])
 
 # --- Functions ---
 def read_csv_smart(uploaded_file):
-    df = pd.read_csv(uploaded_file)
-    df.columns = ["Time","Signal"]
+    uploaded_file.seek(0)
+    try:
+        df = pd.read_csv(uploaded_file)
+        if df.shape[1] != 2:
+            st.error(f"CSV must have exactly 2 columns, got {df.shape[1]}")
+            return None
+        df.columns = ["Time","Signal"]
+    except Exception as e:
+        st.error(f"Error reading CSV: {e}")
+        return None
     return df
 
 def extract_image_data(input_data):
     import re
-    if isinstance(input_data, Image.Image):
-        img = input_data
-    else:
-        img = Image.open(input_data).convert("RGB")
-
-    text = pytesseract.image_to_string(img)
-    rows = []
-    for line in text.splitlines():
-        nums = re.findall(r"[-+]?[0-9]*\.?[0-9]+", line.replace(',', '.'))
-        if len(nums) >= 2:
-            try:
-                rows.append([float(nums[0]), float(nums[1])])
-            except:
-                continue
-    df = pd.DataFrame(rows, columns=["Time","Signal"])
-    return df if not df.empty else None
+    try:
+        if isinstance(input_data, Image.Image):
+            img = input_data
+        else:
+            img = Image.open(input_data).convert("RGB")
+        text = pytesseract.image_to_string(img)
+        rows = []
+        for line in text.splitlines():
+            nums = re.findall(r"[-+]?[0-9]*\.?[0-9]+", line.replace(',', '.'))
+            if len(nums) >= 2:
+                try:
+                    rows.append([float(nums[0]), float(nums[1])])
+                except:
+                    continue
+        df = pd.DataFrame(rows, columns=["Time","Signal"])
+        return df if not df.empty else None
+    except:
+        return None
 
 def extract_pdf_ocr(uploaded_pdf):
     all_rows = []
     uploaded_pdf.seek(0)
     with pdfplumber.open(uploaded_pdf) as pdf:
         for page in pdf.pages:
-            img = page.to_image(resolution=300).original
+            img = page.to_image(resolution=150).original
             df_page = extract_image_data(img)
             if df_page is not None:
                 all_rows.extend(df_page.values.tolist())
@@ -82,14 +93,25 @@ def extract_pdf_ocr(uploaded_pdf):
     return None
 
 # --- Main ---
+df = None
+image_displayed = False
+
 if uploaded_file:
-    df = None
     if uploaded_file.name.endswith(".csv"):
         df = read_csv_smart(uploaded_file)
     elif uploaded_file.name.lower().endswith((".png","jpg","jpeg")):
-        df = extract_image_data(uploaded_file)
+        img = Image.open(uploaded_file)
+        st.image(img, caption="Uploaded image", use_column_width=True)
+        image_displayed = True
+        df = extract_image_data(img)
     elif uploaded_file.name.lower().endswith(".pdf"):
-        df = extract_pdf_ocr(uploaded_file)
+        st.info("Displaying PDF first page as image")
+        with pdfplumber.open(uploaded_file) as pdf:
+            page = pdf.pages[0]
+            img = page.to_image(resolution=150).original
+            st.image(img, caption="PDF page as image", use_column_width=True)
+            image_displayed = True
+            df = extract_pdf_ocr(uploaded_file)
 
     if df is None or df.empty:
         st.warning("No numeric data detected in this file.")
@@ -113,12 +135,15 @@ if uploaded_file:
 
     lod_conc, loq_conc = lod, loq
     if cal_file:
-        cal_df = pd.read_csv(cal_file)
-        X = cal_df.iloc[:,0].values.reshape(-1,1)
-        Y = cal_df.iloc[:,1].values
-        slope = LinearRegression().fit(X,Y).coef_[0]
-        lod_conc = lod/slope
-        loq_conc = loq/slope
+        try:
+            cal_df = pd.read_csv(cal_file)
+            X = cal_df.iloc[:,0].values.reshape(-1,1)
+            Y = cal_df.iloc[:,1].values
+            slope = LinearRegression().fit(X,Y).coef_[0]
+            lod_conc = lod/slope
+            loq_conc = loq/slope
+        except:
+            st.warning("Calibration file could not be read or used.")
 
     # --- Plot ---
     fig = go.Figure()
