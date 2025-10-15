@@ -1,1 +1,4 @@
+# System dependencies for Streamlit app
+libgl1-mesa-glx
 tesseract-ocr
+poppler-utils
